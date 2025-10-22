@@ -2,7 +2,7 @@
 .cache/
 .catkin_workspace
 build/
-devel/
+log/
 image/
-src/CMakeLists.txt
+install/
 *.mp4

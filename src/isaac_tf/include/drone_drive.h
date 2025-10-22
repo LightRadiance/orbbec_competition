@@ -1,8 +1,8 @@
 #ifndef __DRONE_DRIVE_H
 #define __DRONE_DRIVE_H
 
-#include "drone_msgs/ExecStatus.h"
-#include "drone_msgs/PositionCommand.h"
+#include "drone_msgs/msg/ExecStatus.hpp"
+#include "drone_msgs/PositionCommand.hpp"
 #include <cstdint>
 #include <nav_msgs/Odometry.h>
 #include <ros/ros.h>

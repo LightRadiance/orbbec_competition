@@ -1,64 +1,81 @@
 #include "drone_drive.h"
-#include "geometry_msgs/Pose.h"
-#include "geometry_msgs/PoseStamped.h"
-#include "tf/LinearMath/Matrix3x3.h"
+#include "geometry_msgs/msg/pose.hpp"
+#include "geometry_msgs/msg/pose_stamped.hpp"
+#include "geometry_msgs/msg/transform_stamped.hpp"
+#include "nav_msgs/msg/odometry.hpp"
+#include "nav_msgs/msg/path.hpp"
+#include "sensor_msgs/msg/joint_state.hpp"
+#include "std_srvs/srv/empty.hpp"
+
+#include "rclcpp/rclcpp.hpp"
+#include "tf2_ros/transform_listener.h"
+#include "tf2_ros/buffer.h"
+#include "tf2/LinearMath/Quaternion.h"
+#include "tf2_geometry_msgs/tf2_geometry_msgs.hpp"
+
 #include <cmath>
-#include <nav_msgs/Path.h>
-#include <sensor_msgs/JointState.h>
-#include <std_srvs/Empty.h>
-#include <tf/tf.h>
-#include <tf2/LinearMath/Quaternion.h>
+#include <vector>
 
-int main(int argc, char **argv) {
-  ros::init(argc, argv, "drone_drive");
-  ros::NodeHandle nh;
-
-  Drone::DroneDrive drone_drive;
-  drone_drive.init(nh);
-  ROS_INFO("DroneDrive start.");
-  ros::spin();
-  return 0;
-}
-
+using namespace std::chrono_literals;
+using std::placeholders::_1;
 using namespace Drone;
 
-void DroneDrive::init(ros::NodeHandle &nh) {
-  posititon_cmd_sub =
-      nh.subscribe("planning/pos_cmd", 5, &DroneDrive::positionCommandCb, this);
-  joint_pub = nh.advertise<sensor_msgs::JointState>("/drone_cmd", 10);
-  odom_sub = nh.subscribe("/odom", 1, &DroneDrive::odomCb, this);
-  camera_pose_pub = nh.advertise<geometry_msgs::PoseStamped>("/camera_pose", 5);
-  exec_status_sub =
-      nh.subscribe("/planning/exec_status", 1, &DroneDrive::execStatusCb, this);
-  cmd_pub_timer =
-      nh.createTimer(ros::Duration(0.01), &DroneDrive::cmdPubTimerCb, this);
-  nav_pub = nh.advertise<nav_msgs::Path>("/waypoint_generator/waypoints", 1);
-  set_yaw_client = nh.serviceClient<std_srvs::Empty>("/set_yaw");
-  take_picture_client = nh.serviceClient<std_srvs::Empty>("/take_picture");
-  start_record_client = nh.serviceClient<std_srvs::Empty>("/start_record");
-  stop_record_client = nh.serviceClient<std_srvs::Empty>("/stop_record");
+namespace Drone {
+
+DroneDrive::DroneDrive() : Node("drone_drive") {
+  posititon_cmd_sub_ = this->create_subscription<drone_msgs::msg::PositionCommand>(
+      "planning/pos_cmd", 5,
+      std::bind(&DroneDrive::positionCommandCb, this, _1));
+
+  joint_pub_ =
+      this->create_publisher<sensor_msgs::msg::JointState>("/drone_cmd", 10);
+
+  odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
+      "/odom", 1, std::bind(&DroneDrive::odomCb, this, _1));
+
+  camera_pose_pub_ =
+      this->create_publisher<geometry_msgs::msg::PoseStamped>("/camera_pose", 5);
+
+  exec_status_sub_ = this->create_subscription<drone_msgs::msg::ExecStatus>(
+      "/planning/exec_status", 1,
+      std::bind(&DroneDrive::execStatusCb, this, _1));
+
+  nav_pub_ =
+      this->create_publisher<nav_msgs::msg::Path>("/waypoint_generator/waypoints", 1);
+
+  set_yaw_client_ = this->create_client<std_srvs::srv::Empty>("/set_yaw");
+  take_picture_client_ = this->create_client<std_srvs::srv::Empty>("/take_picture");
+  start_record_client_ = this->create_client<std_srvs::srv::Empty>("/start_record");
+  stop_record_client_ = this->create_client<std_srvs::srv::Empty>("/stop_record");
+
+  cmd_pub_timer_ = this->create_wall_timer(
+      10ms, std::bind(&DroneDrive::cmdPubTimerCb, this));
+
+  tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
+  tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
+
+  RCLCPP_INFO(this->get_logger(), "DroneDrive node started.");
 }
 
 // yaw convert to [-2PI, 2PI]
-double yawConvert(double yaw_in) {
+double DroneDrive::yawConvert(double yaw_in) {
   static int loop_cnt = 0;
   static double last_yaw = yaw_in;
   double out_yaw = 0;
-  if (abs(yaw_in - last_yaw) > 1.5 * M_PI) {
-    if (yaw_in < 0) {
+  if (fabs(yaw_in - last_yaw) > 1.5 * M_PI) {
+    if (yaw_in < 0)
       ++loop_cnt;
-    } else {
+    else
       --loop_cnt;
-    }
   }
   last_yaw = yaw_in;
-  if (loop_cnt > 0) {
+  if (loop_cnt > 0)
     out_yaw = yaw_in + 2 * M_PI;
-  } else if (loop_cnt < 0) {
+  else if (loop_cnt < 0)
     out_yaw = yaw_in - 2 * M_PI;
-  } else {
+  else
     out_yaw = yaw_in;
-  }
+
   if (out_yaw > 2 * M_PI) {
     --loop_cnt;
     out_yaw = yaw_in;
@@ -69,258 +86,159 @@ double yawConvert(double yaw_in) {
   return out_yaw;
 }
 
-bool pos_cmd_update = false;
 void DroneDrive::positionCommandCb(
-    const drone_msgs::PositionCommandConstPtr &msg) {
-  planner_pos_cmd.x = msg->position.x;
-  planner_pos_cmd.y = msg->position.y;
-  planner_pos_cmd.z = msg->position.z;
-  planner_pos_cmd.yaw = msg->yaw;
-  pos_cmd_update = true;
+    const drone_msgs::msg::PositionCommand::SharedPtr msg) {
+  planner_pos_cmd_.x = msg->position.x;
+  planner_pos_cmd_.y = msg->position.y;
+  planner_pos_cmd_.z = msg->position.z;
+  planner_pos_cmd_.yaw = msg->yaw;
+  pos_cmd_update_ = true;
 }
 
-void DroneDrive::execStatusCb(const drone_msgs::ExecStatusConstPtr &msg) {
-  exec_status = msg->exec_flag;
+void DroneDrive::execStatusCb(const drone_msgs::msg::ExecStatus::SharedPtr msg) {
+  exec_status_ = msg->exec_flag;
 }
-
-// The drone will fly around the center and record an video
-// The axis is in Isaac Sim, not ROS
-#define CENTER_X (2.0)
-#define CENTER_Y (0.0)
-#define RADIUS (1.25)
-#define SQRT_R (sqrt(RADIUS))
-const PosCmd waypoint_list[] = {
-  {0, 0, 0, 0, false},
-  {0, 0, 0.6, 0, false},
-  {7.18814, -4.13339, 2.9, 0, true},
-  {7.18814, -4.13339, 2.9, 0, false, true},
-  {7.18814, 0.48393, 2.9, 0, true},
-  {7.18814, 0.48393, 2.9, 0, false, true},
-  {7.18814, 5.48069, 2.9, 0, true},
-  {7.18814, 5.48069, 2.9, 0, false, true},
-  {28, 3.50703, 2.9, -M_PI / 2, true},
-  {28, -1.97831, 0.94074, -M_PI, true},
-  {2, -2, 0.7, -M_PI, true},
-  // around franka
-  {CENTER_Y+RADIUS, -CENTER_X, 0.7, -M_PI, false},
-  {CENTER_Y+SQRT_R, -(CENTER_X-SQRT_R), 0.7, -M_PI*3/4, false},
-  {CENTER_Y, -(CENTER_X-RADIUS), 0.7, -M_PI/2, false},
-  {CENTER_Y-SQRT_R, -(CENTER_X-SQRT_R), 0.7, -M_PI/4, false},
-  {CENTER_Y-RADIUS, -(CENTER_X), 0.7, 0, false},
-  {CENTER_Y-SQRT_R, -(CENTER_X+SQRT_R), 0.7, M_PI/4, false},
-  {CENTER_Y, -(CENTER_X+RADIUS), 0.7, M_PI/2, false},
-  {CENTER_Y+SQRT_R, -(CENTER_X+SQRT_R), 0.7, M_PI*3/4, false},
-  // around franks 2
-  {CENTER_Y+RADIUS, -CENTER_X, 0.4, M_PI, false},
-  {CENTER_Y+SQRT_R, -(CENTER_X+SQRT_R), 0.4, M_PI*3/4, false},
-  {CENTER_Y, -(CENTER_X+RADIUS), 0.4, M_PI/2, false},
-  {CENTER_Y-SQRT_R, -(CENTER_X+SQRT_R), 0.4, M_PI/4, false},
-  {CENTER_Y-RADIUS, -(CENTER_X), 0.4, 0, false},
-  {CENTER_Y-SQRT_R, -(CENTER_X-SQRT_R), 0.4, -M_PI/4, false},
-  {CENTER_Y, -(CENTER_X-RADIUS), 0.4, -M_PI/2, false},
-  {CENTER_Y+SQRT_R, -(CENTER_X-SQRT_R), 0.4, -M_PI*3/4, false},
-  {CENTER_Y+RADIUS, -CENTER_X, 0.4, -M_PI, false},
-
-  {0, 0, 0.4, 0, true},
-  {0, 0, 0, 0, false},
-};
-#define VIDEO_START ((int)11)
-#define VIDEO_STOP ((int)27)
 
 bool DroneDrive::inPosition(PosCmd p2) {
-#define DIS_ABS (0.2)
-
-  geometry_msgs::Pose p1 = odom.pose.pose;
-  double dis =
-      sqrt(pow(p1.position.x - p2.x, 2) + pow(p1.position.y - p2.y, 2) +
-           pow(p1.position.z - p2.z, 2));
-
-  if (dis < DIS_ABS) {
-    return true;
-  }
-
-  // ROS_INFO("distance error: %f", dis);
-  // ROS_INFO("waypoint x:%.1f, y:%.1f, z:%.1f, plan_ctrl=%d", p2.x, p2.y, p2.z,
-  //          p2.planner_ctrl);
-  // ROS_INFO("odom x:%.1f, y:%.1f, z:%.1f", p1.position.x, p1.position.y,
-  //          p1.position.z);
-
-  return false;
+  const double DIS_ABS = 0.2;
+  geometry_msgs::msg::Pose p1 = odom_.pose.pose;
+  double dis = sqrt(pow(p1.position.x - p2.x, 2) +
+                    pow(p1.position.y - p2.y, 2) +
+                    pow(p1.position.z - p2.z, 2));
+  return dis < DIS_ABS;
 }
 
 bool DroneDrive::inYaw(PosCmd p2) {
-#define YAW_ABS (5.0 / 180.0 * M_PI)
+  const double YAW_ABS = 5.0 / 180.0 * M_PI;
+  geometry_msgs::msg::Pose p1 = odom_.pose.pose;
 
-  geometry_msgs::Pose p1 = odom.pose.pose;
-  tf::Quaternion q(p1.orientation.x, p1.orientation.y, p1.orientation.z,
-                   p1.orientation.w);
-  double r, p, y;
-  tf::Matrix3x3(q).getRPY(r, p, y);
-
-  if (abs(y - p2.yaw) < YAW_ABS) {
-    return true;
-  }
-
-  // ROS_INFO("yaw error: %.1f, now:%.1f, expect:%.1f", abs(y - p2.yaw), y,
-  //          p2.yaw);
-  return false;
+  tf2::Quaternion q(p1.orientation.x, p1.orientation.y,
+                    p1.orientation.z, p1.orientation.w);
+  double roll, pitch, yaw;
+  tf2::Matrix3x3(q).getRPY(roll, pitch, yaw);
+  return fabs(yaw - p2.yaw) < YAW_ABS;
 }
 
 void DroneDrive::pubWaypoint(PosCmd p) {
-  geometry_msgs::PoseStamped pose;
+  geometry_msgs::msg::PoseStamped pose;
   pose.header.frame_id = "world";
-  pose.header.stamp = ros::Time::now();
+  pose.header.stamp = this->now();
   pose.pose.position.x = p.x;
   pose.pose.position.y = p.y;
   pose.pose.position.z = p.z;
+
   tf2::Quaternion q;
   q.setRPY(0, 0, p.yaw);
   q.normalize();
-  pose.pose.orientation.w = q.w();
-  pose.pose.orientation.x = q.x();
-  pose.pose.orientation.y = q.y();
-  pose.pose.orientation.z = q.z();
+  pose.pose.orientation = tf2::toMsg(q);
 
-  nav_msgs::Path path;
+  nav_msgs::msg::Path path;
   path.poses.push_back(pose);
   path.header.frame_id = "world";
-  path.header.stamp = ros::Time::now();
-  nav_pub.publish(path);
+  path.header.stamp = this->now();
+  nav_pub_->publish(path);
 }
 
-void DroneDrive::cmdPubTimerCb(const ros::TimerEvent &e) {
-  static int waypoint_now = 0;
-  static bool finish = false;
-  if (exec_status == NONE || finish) {
+void DroneDrive::odomCb(const nav_msgs::msg::Odometry::SharedPtr msg) {
+  odom_ = *msg;
+  geometry_msgs::msg::TransformStamped tf_stamped;
+  try {
+    tf_stamped = tf_buffer_->lookupTransform("odom", "camera", tf2::TimePointZero);
+  } catch (tf2::TransformException &ex) {
+    RCLCPP_WARN(this->get_logger(), "%s", ex.what());
     return;
   }
 
-  // traj complete?
-  if (inPosition(waypoint_list[waypoint_now]) == true) { // arrived?
-    bool next = false, take_picture = false;
-    if (waypoint_list[waypoint_now].planner_ctrl ==
-        false) {                       // planner or manual
-      if (smooth_pos.trajComplete()) { // manual complete
+  geometry_msgs::msg::PoseStamped camera_pose;
+  camera_pose.header.frame_id = tf_stamped.child_frame_id;
+  camera_pose.header.stamp = this->now();
+  camera_pose.pose.position.x = tf_stamped.transform.translation.x;
+  camera_pose.pose.position.y = tf_stamped.transform.translation.y;
+  camera_pose.pose.position.z = tf_stamped.transform.translation.z;
+  camera_pose.pose.orientation = tf_stamped.transform.rotation;
+  camera_pose_pub_->publish(camera_pose);
+}
+
+void DroneDrive::cmdPubTimerCb() {
+  static int waypoint_now = 0;
+  static bool finish = false;
+
+  if (exec_status_ == NONE || finish)
+    return;
+
+  if (inPosition(waypoint_list_[waypoint_now])) {
+    bool next = false;
+    if (waypoint_list_[waypoint_now].planner_ctrl == false) {
+      if (smooth_pos_.trajComplete())
         next = true;
-      }
-    } else if (exec_status == WAIT_TARGET) { // planner complete
+    } else if (exec_status_ == WAIT_TARGET)
       next = true;
-    }
-    if (next) { // current traj complete, execute next
-      if (waypoint_list[waypoint_now].picture) { // take picture?
-        std_srvs::Empty srv;
-        if (!take_picture_client.call(srv)) {
-          ROS_WARN("Take picture fail at x:%.1f, y:%.1f, z:%.1f. Go on.",
-                   waypoint_list[waypoint_now].x, waypoint_list[waypoint_now].y,
-                   waypoint_list[waypoint_now].z);
+
+    if (next) {
+      if (waypoint_list_[waypoint_now].picture) {
+        auto srv = std::make_shared<std_srvs::srv::Empty::Request>();
+        if (!take_picture_client_->service_is_ready() ||
+            !take_picture_client_->async_send_request(srv)) {
+          RCLCPP_WARN(this->get_logger(), "Take picture failed.");
         }
       }
 
       ++waypoint_now;
-      if (waypoint_now >= sizeof(waypoint_list) / sizeof(PosCmd)) {
-        ROS_INFO("All waypoint published. Complete.");
+      if (waypoint_now >= waypoint_list_.size()) {
+        RCLCPP_INFO(this->get_logger(), "All waypoint executed. Finish.");
         finish = true;
-        cmd_pub_timer.stop();
         return;
       }
-      // record video
-      if (waypoint_now==VIDEO_START) {
-        std_srvs::Empty srv;
-        if (!start_record_client.call(srv)) {
-          ROS_ERROR("Call service start record video fail!");
-        }
-      } else if (waypoint_now==VIDEO_STOP+1) {
-        std_srvs::Empty srv;
-        if (!stop_record_client.call(srv)) {
-          ROS_ERROR("Call service stop record video fail!");
-        }
+
+      if (waypoint_now == VIDEO_START_) {
+        auto req = std::make_shared<std_srvs::srv::Empty::Request>();
+        start_record_client_->async_send_request(req);
+      } else if (waypoint_now == VIDEO_STOP_ + 1) {
+        auto req = std::make_shared<std_srvs::srv::Empty::Request>();
+        stop_record_client_->async_send_request(req);
       }
-      ROS_INFO("new waypoint x:%.1f, y:%.1f, z:%.1f, yaw:%.1f, plan_ctrl=%d",
-               waypoint_list[waypoint_now].x, waypoint_list[waypoint_now].y,
-               waypoint_list[waypoint_now].z, waypoint_list[waypoint_now].yaw,
-               waypoint_list[waypoint_now].planner_ctrl);
-      if (waypoint_list[waypoint_now].planner_ctrl == true) { // next planner
-        pos_cmd_update = false; // clean flag of planner control command receive
-        if (waypoint_list[waypoint_now - 1].planner_ctrl == false) {
-          std_srvs::Empty srv;
-          if (!set_yaw_client.call(srv)) {
-            ROS_WARN("Set yaw fail!");
-          }
-          ROS_INFO("Reseted yaw.");
-        }
-        pubWaypoint(waypoint_list[waypoint_now]);
-        return; // return wait for pos_cmd_update;
-      } else {  // next manual
-        smooth_pos.genNew(waypoint_list[waypoint_now - 1],
-                          waypoint_list[waypoint_now]);
+
+      RCLCPP_INFO(this->get_logger(),
+                  "New waypoint: x=%.1f y=%.1f z=%.1f yaw=%.1f",
+                  waypoint_list_[waypoint_now].x,
+                  waypoint_list_[waypoint_now].y,
+                  waypoint_list_[waypoint_now].z,
+                  waypoint_list_[waypoint_now].yaw);
+
+      if (waypoint_list_[waypoint_now].planner_ctrl) {
+        pos_cmd_update_ = false;
+        pubWaypoint(waypoint_list_[waypoint_now]);
+        return;
+      } else {
+        smooth_pos_.genNew(waypoint_list_[waypoint_now - 1],
+                           waypoint_list_[waypoint_now]);
       }
     }
   }
 
-  // make sure receive planner contorl command
-  if (waypoint_list[waypoint_now].planner_ctrl == true) {
-    if (!pos_cmd_update) {
-      return;
-    } else {
-      pos_cmd_update = false;
-    }
-  }
-
-  // publish joint control command
-  sensor_msgs::JointState joint_cmd;
-  joint_cmd.name = {"x_joint", "y_joint", "z_joint", "R_body"};
-  if (waypoint_list[waypoint_now].planner_ctrl) { // planner
-    joint_cmd.position = {planner_pos_cmd.x, planner_pos_cmd.y,
-                          planner_pos_cmd.z, yawConvert(planner_pos_cmd.yaw)};
-  } else { // manual
-    joint_cmd.position = smooth_pos.getPosNow();
-  }
-  joint_cmd.header.stamp = ros::Time::now();
-  joint_pub.publish(joint_cmd);
-}
-
-void DroneDrive::odomCb(const nav_msgs::OdometryConstPtr &msg) {
-  odom = *msg;
-
-  geometry_msgs::TransformStamped tf_stamped;
-  try {
-    tf_stamped = tf_buffer.lookupTransform("odom", "camera", ros::Time(0));
-  } catch (tf2::TransformException &e) {
-    ROS_WARN("%s", e.what());
+  if (waypoint_list_[waypoint_now].planner_ctrl && !pos_cmd_update_)
     return;
+
+  sensor_msgs::msg::JointState joint_cmd;
+  joint_cmd.name = {"x_joint", "y_joint", "z_joint", "R_body"};
+
+  if (waypoint_list_[waypoint_now].planner_ctrl) {
+    joint_cmd.position = {planner_pos_cmd_.x, planner_pos_cmd_.y,
+                          planner_pos_cmd_.z, yawConvert(planner_pos_cmd_.yaw)};
+  } else {
+    joint_cmd.position = smooth_pos_.getPosNow();
   }
 
-  geometry_msgs::PoseStamped camera_pose;
-  camera_pose.pose.orientation = tf_stamped.transform.rotation;
-  camera_pose.pose.position.x = tf_stamped.transform.translation.x;
-  camera_pose.pose.position.y = tf_stamped.transform.translation.y;
-  camera_pose.pose.position.z = tf_stamped.transform.translation.z;
-  camera_pose.header.frame_id = tf_stamped.child_frame_id;
-  camera_pose.header.stamp = ros::Time::now();
-  camera_pose_pub.publish(camera_pose);
+  joint_cmd.header.stamp = this->now();
+  joint_pub_->publish(joint_cmd);
 }
 
-void SmoothTraj::genNew(PosCmd start, PosCmd end) {
-  start_time = ros::Time::now().toSec();
-  start_pos = start;
-  end_pos = end;
-}
-std::vector<double> SmoothTraj::getPosNow(void) {
-  if (trajComplete()) {
-    return {end_pos.x, end_pos.y, end_pos.z, yawConvert(end_pos.yaw)};
-  }
-  double scale = (ros::Time::now().toSec() - start_time) / TRAJ_TIME;
-  double x, y, z, yaw;
-  x = scale * (end_pos.x - start_pos.x) + start_pos.x;
-  y = scale * (end_pos.y - start_pos.y) + start_pos.y;
-  z = scale * (end_pos.z - start_pos.z) + start_pos.z;
-  yaw = scale * (end_pos.yaw - start_pos.yaw) + start_pos.yaw;
-  yaw = yawConvert(yaw);
-  return {x, y, z, yaw};
-}
-bool SmoothTraj::trajComplete(void) {
-  if (ros::Time::now().toSec() >= start_time + TRAJ_TIME) {
-    return true;
-  }
-  return false;
+} // namespace Drone
+
+int main(int argc, char **argv) {
+  rclcpp::init(argc, argv);
+  auto node = std::make_shared<Drone::DroneDrive>();
+  rclcpp::spin(node);
+  rclcpp::shutdown();
+  return 0;
 }
