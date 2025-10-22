@@ -18,7 +18,7 @@
 
 using namespace std::chrono_literals;
 using std::placeholders::_1;
-using namespace Drone;
+// using namespace Drone;
 
 namespace Drone {
 
@@ -177,8 +177,11 @@ void DroneDrive::cmdPubTimerCb() {
     if (next) {
       if (waypoint_list_[waypoint_now].picture) {
         auto srv = std::make_shared<std_srvs::srv::Empty::Request>();
-        if (!take_picture_client_->service_is_ready() ||
-            !take_picture_client_->async_send_request(srv)) {
+        // if (!take_picture_client_->service_is_ready() ||
+        //     !take_picture_client_->async_send_request(srv)) {
+        //   RCLCPP_WARN(this->get_logger(), "Take picture failed.");
+        // }
+        if (!take_picture_client_->service_is_ready()) {
           RCLCPP_WARN(this->get_logger(), "Take picture failed.");
         }
       }
