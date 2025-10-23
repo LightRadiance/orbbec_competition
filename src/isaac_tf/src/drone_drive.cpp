@@ -21,44 +21,7 @@ using std::placeholders::_1;
 // using namespace Drone;
 
 namespace Drone {
-
-DroneDrive::DroneDrive() : Node("drone_drive") {
-  posititon_cmd_sub_ = this->create_subscription<drone_msgs::msg::PositionCommand>(
-      "planning/pos_cmd", 5,
-      std::bind(&DroneDrive::positionCommandCb, this, _1));
-
-  joint_pub_ =
-      this->create_publisher<sensor_msgs::msg::JointState>("/drone_cmd", 10);
-
-  odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
-      "/odom", 1, std::bind(&DroneDrive::odomCb, this, _1));
-
-  camera_pose_pub_ =
-      this->create_publisher<geometry_msgs::msg::PoseStamped>("/camera_pose", 5);
-
-  exec_status_sub_ = this->create_subscription<drone_msgs::msg::ExecStatus>(
-      "/planning/exec_status", 1,
-      std::bind(&DroneDrive::execStatusCb, this, _1));
-
-  nav_pub_ =
-      this->create_publisher<nav_msgs::msg::Path>("/waypoint_generator/waypoints", 1);
-
-  set_yaw_client_ = this->create_client<std_srvs::srv::Empty>("/set_yaw");
-  take_picture_client_ = this->create_client<std_srvs::srv::Empty>("/take_picture");
-  start_record_client_ = this->create_client<std_srvs::srv::Empty>("/start_record");
-  stop_record_client_ = this->create_client<std_srvs::srv::Empty>("/stop_record");
-
-  cmd_pub_timer_ = this->create_wall_timer(
-      10ms, std::bind(&DroneDrive::cmdPubTimerCb, this));
-
-  tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
-  tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
-
-  RCLCPP_INFO(this->get_logger(), "DroneDrive node started.");
-}
-
-// yaw convert to [-2PI, 2PI]
-double DroneDrive::yawConvert(double yaw_in) {
+double yawConvert(double yaw_in) {
   static int loop_cnt = 0;
   static double last_yaw = yaw_in;
   double out_yaw = 0;
@@ -86,8 +49,85 @@ double DroneDrive::yawConvert(double yaw_in) {
   return out_yaw;
 }
 
+DroneDrive::DroneDrive() : Node("drone_drive") {
+  // Subscriber
+  // "planning/pos_cmd" will add node namespace automatically
+  posititon_cmd_sub_ = this->create_subscription<drone_msgs::msg::PositionCommand>(
+      "/planning/pos_cmd", 5,
+      std::bind(&DroneDrive::positionCommandCb, this, _1));
+  odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
+      "/odom", 1, std::bind(&DroneDrive::odomCb, this, _1));
+  exec_status_sub_ = this->create_subscription<drone_msgs::msg::ExecStatus>(
+      "/planning/exec_status", 1,
+      std::bind(&DroneDrive::execStatusCb, this, _1));
+
+  //  Publisher
+  joint_pub_ =
+      this->create_publisher<sensor_msgs::msg::JointState>("/drone_cmd", 10);
+  camera_pose_pub_ =
+      this->create_publisher<geometry_msgs::msg::PoseStamped>("/camera_pose", 5);
+  nav_pub_ =
+      this->create_publisher<nav_msgs::msg::Path>("/waypoint_generator/waypoints", 1);
+
+  // Client
+  set_yaw_client_ = this->create_client<std_srvs::srv::Empty>("/set_yaw");
+  take_picture_client_ = this->create_client<std_srvs::srv::Empty>("/take_picture");
+  start_record_client_ = this->create_client<std_srvs::srv::Empty>("/start_record");
+  stop_record_client_ = this->create_client<std_srvs::srv::Empty>("/stop_record");
+
+  cmd_pub_timer_ = this->create_wall_timer(
+      10ms, std::bind(&DroneDrive::cmdPubTimerCb, this));
+
+  tf_buffer_ = std::make_unique<tf2_ros::Buffer>(this->get_clock());
+  tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
+
+  constexpr double CENTER_X = 2.0;
+  constexpr double CENTER_Y = 0.0;
+  constexpr double RADIUS = 1.25;
+  constexpr double SQRT_R = 1.118;
+  waypoint_list_= {
+    {0, 0, 0, 0, false},
+    {0, 0, 0.6, 0, false},
+    {7.18814, -4.13339, 2.9, 0, true},
+    {7.18814, -4.13339, 2.9, 0, false, true},
+    {7.18814, 0.48393, 2.9, 0, true},
+    {7.18814, 0.48393, 2.9, 0, false, true},
+    {7.18814, 5.48069, 2.9, 0, true},
+    {7.18814, 5.48069, 2.9, 0, false, true},
+    {28, 3.50703, 2.9, -M_PI / 2, true},
+    {28, -1.97831, 0.94074, -M_PI, true},
+    {2, -2, 0.7, -M_PI, true},
+    // around franka
+    {CENTER_Y+RADIUS, -CENTER_X, 0.7, -M_PI, false},
+    {CENTER_Y+SQRT_R, -(CENTER_X-SQRT_R), 0.7, -M_PI*3/4, false},
+    {CENTER_Y, -(CENTER_X-RADIUS), 0.7, -M_PI/2, false},
+    {CENTER_Y-SQRT_R, -(CENTER_X-SQRT_R), 0.7, -M_PI/4, false},
+    {CENTER_Y-RADIUS, -(CENTER_X), 0.7, 0, false},
+    {CENTER_Y-SQRT_R, -(CENTER_X+SQRT_R), 0.7, M_PI/4, false},
+    {CENTER_Y, -(CENTER_X+RADIUS), 0.7, M_PI/2, false},
+    {CENTER_Y+SQRT_R, -(CENTER_X+SQRT_R), 0.7, M_PI*3/4, false},
+    // around franks 2
+    {CENTER_Y+RADIUS, -CENTER_X, 0.4, M_PI, false},
+    {CENTER_Y+SQRT_R, -(CENTER_X+SQRT_R), 0.4, M_PI*3/4, false},
+    {CENTER_Y, -(CENTER_X+RADIUS), 0.4, M_PI/2, false},
+    {CENTER_Y-SQRT_R, -(CENTER_X+SQRT_R), 0.4, M_PI/4, false},
+    {CENTER_Y-RADIUS, -(CENTER_X), 0.4, 0, false},
+    {CENTER_Y-SQRT_R, -(CENTER_X-SQRT_R), 0.4, -M_PI/4, false},
+    {CENTER_Y, -(CENTER_X-RADIUS), 0.4, -M_PI/2, false},
+    {CENTER_Y+SQRT_R, -(CENTER_X-SQRT_R), 0.4, -M_PI*3/4, false},
+    {CENTER_Y+RADIUS, -CENTER_X, 0.4, -M_PI, false},
+
+    {0, 0, 0.4, 0, true},
+    {0, 0, 0, 0, false},
+  };
+  
+  RCLCPP_INFO(this->get_logger(), "DroneDrive node started.");
+}
+
+
 void DroneDrive::positionCommandCb(
     const drone_msgs::msg::PositionCommand::SharedPtr msg) {
+  // Just store the command
   planner_pos_cmd_.x = msg->position.x;
   planner_pos_cmd_.y = msg->position.y;
   planner_pos_cmd_.z = msg->position.z;
@@ -163,16 +203,15 @@ void DroneDrive::cmdPubTimerCb() {
   static int waypoint_now = 0;
   static bool finish = false;
 
-  if (exec_status_ == NONE || finish)
-    return;
+  if (exec_status_ == NONE || finish) return;
 
+  // Reach target
   if (inPosition(waypoint_list_[waypoint_now])) {
     bool next = false;
-    if (waypoint_list_[waypoint_now].planner_ctrl == false) {
-      if (smooth_pos_.trajComplete())
+    if (!waypoint_list_[waypoint_now].planner_ctrl) {
+      if (smooth_pos_.trajComplete(this->now()))
         next = true;
-    } else if (exec_status_ == WAIT_TARGET)
-      next = true;
+    } else if (exec_status_ == WAIT_TARGET) next = true;
 
     if (next) {
       if (waypoint_list_[waypoint_now].picture) {
@@ -214,13 +253,12 @@ void DroneDrive::cmdPubTimerCb() {
         return;
       } else {
         smooth_pos_.genNew(waypoint_list_[waypoint_now - 1],
-                           waypoint_list_[waypoint_now]);
+                           waypoint_list_[waypoint_now], this->now());
       }
     }
   }
 
-  if (waypoint_list_[waypoint_now].planner_ctrl && !pos_cmd_update_)
-    return;
+  if (waypoint_list_[waypoint_now].planner_ctrl && !pos_cmd_update_) return;
 
   sensor_msgs::msg::JointState joint_cmd;
   joint_cmd.name = {"x_joint", "y_joint", "z_joint", "R_body"};
@@ -229,7 +267,7 @@ void DroneDrive::cmdPubTimerCb() {
     joint_cmd.position = {planner_pos_cmd_.x, planner_pos_cmd_.y,
                           planner_pos_cmd_.z, yawConvert(planner_pos_cmd_.yaw)};
   } else {
-    joint_cmd.position = smooth_pos_.getPosNow();
+    joint_cmd.position = smooth_pos_.getPosNow(this->now());
   }
 
   joint_cmd.header.stamp = this->now();

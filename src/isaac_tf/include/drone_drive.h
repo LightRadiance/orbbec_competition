@@ -23,15 +23,40 @@ namespace Drone {
 
 struct PosCmd {
   double x{0.0}, y{0.0}, z{0.0}, yaw{0.0};
-  bool picture{false};
   bool planner_ctrl{false};
+  bool picture{false}; // Whether to take picture 
 };
 
+// Yaw convert to [-2PI, 2PI]
+double yawConvert(double yaw_in);
+
+// This class may be not complete
 class SmoothTraj {
+private:
+  #define TRAJ_TIME (1.0)
+  PosCmd start_pos, end_pos;
+  double start_time;
+
 public:
-  void genNew(const PosCmd &, const PosCmd &) {}
-  bool trajComplete() const { return true; }
-  std::vector<double> getPosNow() const { return {0.0, 0.0, 0.0, 0.0}; }
+  void genNew(const PosCmd &start, const PosCmd &end, const rclcpp::Time& now) {
+    start_pos = start;
+    end_pos = end;
+    start_time = now.seconds();
+  }
+
+  bool trajComplete(const rclcpp::Time& now) const { return now.seconds()>=start_time+TRAJ_TIME; }
+
+  std::vector<double> getPosNow(const rclcpp::Time& now) const { 
+    if (trajComplete(now)) return {end_pos.x, end_pos.y, end_pos.z, yawConvert(end_pos.yaw)};
+    double scale = (now.seconds() - start_time) / TRAJ_TIME;
+    double x, y, z, yaw;
+    x = scale * (end_pos.x - start_pos.x) + start_pos.x;
+    y = scale * (end_pos.y - start_pos.y) + start_pos.y;
+    z = scale * (end_pos.z - start_pos.z) + start_pos.z;
+    yaw = scale * (end_pos.yaw - start_pos.yaw) + start_pos.yaw;
+    yaw = yawConvert(yaw);
+    return {x, y, z, yaw};
+  }
 };
 
 // === 主类声明 ===
@@ -39,9 +64,10 @@ class DroneDrive : public rclcpp::Node {
 public:
   DroneDrive();
 
+private:
   // Subscriber
-  rclcpp::Subscription<drone_msgs::msg::PositionCommand>::SharedPtr posititon_cmd_sub_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
+  rclcpp::Subscription<drone_msgs::msg::PositionCommand>::SharedPtr posititon_cmd_sub_;
   rclcpp::Subscription<drone_msgs::msg::ExecStatus>::SharedPtr exec_status_sub_;
 
   rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr joint_pub_;
@@ -64,8 +90,8 @@ public:
   std::vector<PosCmd> waypoint_list_;
   bool pos_cmd_update_{false};
 
-  int VIDEO_START_{2};
-  int VIDEO_STOP_{5};
+  int VIDEO_START_{11};
+  int VIDEO_STOP_{27};
 
   enum ExecState : uint8_t {
     INIT = 0,
@@ -78,16 +104,18 @@ public:
   };
   uint8_t exec_status_{NONE};
 
-  // ==== 回调函数 ====
+  // Callback
   void positionCommandCb(const drone_msgs::msg::PositionCommand::SharedPtr msg);
   void execStatusCb(const drone_msgs::msg::ExecStatus::SharedPtr msg);
   void odomCb(const nav_msgs::msg::Odometry::SharedPtr msg);
   void cmdPubTimerCb();
 
-  // ==== 功能函数 ====
-  double yawConvert(double yaw_in);
+
+  // Check if reaching target(x, y z)
   bool inPosition(PosCmd target);
+  // Check if reaching target(yaw)
   bool inYaw(PosCmd target);
+
   void pubWaypoint(PosCmd target);
 };
 

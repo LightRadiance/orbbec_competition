@@ -29,13 +29,11 @@ public:
         image_save_path_("/home/labor/Documents/research/orbbec_competition/image/"),
         video_save_path_("/home/labor/Documents/research/orbbec_competition/video/") {
 
-    // 声明参数并读取
     this->declare_parameter("image_save_path", image_save_path_);
     this->declare_parameter("video_save_path", video_save_path_);
     this->get_parameter("image_save_path", image_save_path_);
     this->get_parameter("video_save_path", video_save_path_);
 
-    // 路径检查
     if (!fs::exists(image_save_path_)) {
       RCLCPP_ERROR(this->get_logger(),
                    "Path %s not exist. Please create directory first.",
@@ -51,13 +49,13 @@ public:
       return;
     }
 
-    // 订阅与服务
+    // Subsriber and Service
     image_sub_ = this->create_subscription<sensor_msgs::msg::Image>(
         "/camera_rgb", 10,
         std::bind(&TakePictureServer::imageCb, this, std::placeholders::_1));
-    odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
-        "/odom", 10,
-        std::bind(&TakePictureServer::odomCb, this, std::placeholders::_1));
+    // odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
+    //     "/odom", 10,
+    //     std::bind(&TakePictureServer::odomCb, this, std::placeholders::_1));
 
     take_picture_srv_ = this->create_service<std_srvs::srv::Empty>(
         "/take_picture",
@@ -146,7 +144,6 @@ private:
     RCLCPP_INFO(this->get_logger(), "Stop recording video.");
   }
 
-  // ===== 订阅回调 =====
   void imageCb(const sensor_msgs::msg::Image::SharedPtr msg) {
     camera_msg_ = msg;
 
@@ -164,16 +161,15 @@ private:
     }
   }
 
-  void odomCb(const nav_msgs::msg::Odometry::SharedPtr msg) { odom_msg_ = msg; }
+  // void odomCb(const nav_msgs::msg::Odometry::SharedPtr msg) { odom_msg_ = msg; }
 
-  // ===== 成员变量 =====
   bool recording_;
   std::string image_save_path_;
   std::string video_save_path_;
   cv::VideoWriter output_video_;
 
   sensor_msgs::msg::Image::SharedPtr camera_msg_;
-  nav_msgs::msg::Odometry::SharedPtr odom_msg_;
+  // nav_msgs::msg::Odometry::SharedPtr odom_msg_;
 
   rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr image_sub_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
