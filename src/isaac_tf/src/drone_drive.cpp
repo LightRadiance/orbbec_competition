@@ -15,6 +15,7 @@
 
 #include <cmath>
 #include <vector>
+#include <Eigen/Eigen>
 
 using namespace std::chrono_literals;
 using std::placeholders::_1;
@@ -52,23 +53,24 @@ double yawConvert(double yaw_in) {
 DroneDrive::DroneDrive() : Node("drone_drive") {
   // Subscriber
   // "planning/pos_cmd" will add node namespace automatically
-  posititon_cmd_sub_ = this->create_subscription<drone_msgs::msg::PositionCommand>(
-      "/planning/pos_cmd", 5,
+  posititon_cmd_sub_ = this->create_subscription<quadrotor_msgs::msg::PositionCommand>(
+      "/drone_0_planning/pos_cmd", 5,
       std::bind(&DroneDrive::positionCommandCb, this, _1));
   odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
-      "/odom", 1, std::bind(&DroneDrive::odomCb, this, _1));
-  exec_status_sub_ = this->create_subscription<drone_msgs::msg::ExecStatus>(
+      "/drone_0_visual_slam/odom", 1, std::bind(&DroneDrive::odomCb, this, _1));
+  exec_status_sub_ = this->create_subscription<quadrotor_msgs::msg::ExecStatus>(
       "/planning/exec_status", 1,
       std::bind(&DroneDrive::execStatusCb, this, _1));
 
   //  Publisher
   joint_pub_ =
-      this->create_publisher<sensor_msgs::msg::JointState>("/drone_cmd", 10);
+      this->create_publisher<sensor_msgs::msg::JointState>("/drone_0_cmd", 10);
+  joint_debug_pub_ =
+      this->create_publisher<drone_msgs::msg::JointState>("/drone_0_cmd_debug", 10);
   camera_pose_pub_ =
-      this->create_publisher<geometry_msgs::msg::PoseStamped>("/camera_pose", 5);
-  nav_pub_ =
-      this->create_publisher<nav_msgs::msg::Path>("/waypoint_generator/waypoints", 1);
-
+      this->create_publisher<geometry_msgs::msg::PoseStamped>("/drone_0_pcl_render_node/camera_pose", 5);
+  nav_pub_ = 
+      this->create_publisher<geometry_msgs::msg::PoseStamped>("/move_base_simple/goal", 1);
   // Client
   set_yaw_client_ = this->create_client<std_srvs::srv::Empty>("/set_yaw");
   take_picture_client_ = this->create_client<std_srvs::srv::Empty>("/take_picture");
@@ -85,48 +87,78 @@ DroneDrive::DroneDrive() : Node("drone_drive") {
   constexpr double CENTER_Y = 0.0;
   constexpr double RADIUS = 1.25;
   constexpr double SQRT_R = 1.118;
+  // waypoint_list_= {
+  //   {0, 0, 0, 0, false},
+  //   {0, 0, 0.6, 0, false},
+  //   // {7.18814, -4.13339, 2.9, 0, true},
+  //   {7.18814, -4.13339, 2.9, 0, true},
+  //   {7.18814, -4.13339, 2.9, 0, false, true},
+  //   // {7.18814, 0.48393, 2.9, 0, true},
+  //   {7.18814, 0.48393, 2.9, 0, true},
+  //   {7.18814, 0.48393, 2.9, 0, false, true},
+  //   // {7.18814, 5.48069, 2.9, 0, true},
+  //   {7.18814, 5.48069, 2.9, 0, true},
+  //   {7.18814, 5.48069, 2.9, 0, false, true},
+  //   // {28, 3.50703, 2.9, -M_PI / 2, true},
+  //   {28, 3.50703, 2.9, -M_PI / 2, true},
+  //   // {28, -1.97831, 0.94074, -M_PI, true},
+  //   {28, -1.97831, 0.94074, -M_PI, true},
+  //   // {2, -2, 0.7, -M_PI, true},
+  //   {2, -2, 0.7, -M_PI, true},
+  //   // around franka
+  //   {CENTER_Y+RADIUS, -CENTER_X, 0.7, -M_PI, false},
+  //   {CENTER_Y+SQRT_R, -(CENTER_X-SQRT_R), 0.7, -M_PI*3/4, false},
+  //   {CENTER_Y, -(CENTER_X-RADIUS), 0.7, -M_PI/2, false},
+  //   {CENTER_Y-SQRT_R, -(CENTER_X-SQRT_R), 0.7, -M_PI/4, false},
+  //   {CENTER_Y-RADIUS, -(CENTER_X), 0.7, 0, false},
+  //   {CENTER_Y-SQRT_R, -(CENTER_X+SQRT_R), 0.7, M_PI/4, false},
+  //   {CENTER_Y, -(CENTER_X+RADIUS), 0.7, M_PI/2, false},
+  //   {CENTER_Y+SQRT_R, -(CENTER_X+SQRT_R), 0.7, M_PI*3/4, false},
+  //   // around franks 2
+  //   {CENTER_Y+RADIUS, -CENTER_X, 0.4, M_PI, false},
+  //   {CENTER_Y+SQRT_R, -(CENTER_X+SQRT_R), 0.4, M_PI*3/4, false},
+  //   {CENTER_Y, -(CENTER_X+RADIUS), 0.4, M_PI/2, false},
+  //   {CENTER_Y-SQRT_R, -(CENTER_X+SQRT_R), 0.4, M_PI/4, false},
+  //   {CENTER_Y-RADIUS, -(CENTER_X), 0.4, 0, false},
+  //   {CENTER_Y-SQRT_R, -(CENTER_X-SQRT_R), 0.4, -M_PI/4, false},
+  //   {CENTER_Y, -(CENTER_X-RADIUS), 0.4, -M_PI/2, false},
+  //   {CENTER_Y+SQRT_R, -(CENTER_X-SQRT_R), 0.4, -M_PI*3/4, false},
+  //   {CENTER_Y+RADIUS, -CENTER_X, 0.4, -M_PI, false},
+
+  //   {0, 0, 0.4, 0, true},
+  //   {0, 0, 0, 0, false},
+  // };
+
+  // Test
   waypoint_list_= {
     {0, 0, 0, 0, false},
     {0, 0, 0.6, 0, false},
-    {7.18814, -4.13339, 2.9, 0, true},
-    {7.18814, -4.13339, 2.9, 0, false, true},
-    {7.18814, 0.48393, 2.9, 0, true},
-    {7.18814, 0.48393, 2.9, 0, false, true},
-    {7.18814, 5.48069, 2.9, 0, true},
-    {7.18814, 5.48069, 2.9, 0, false, true},
-    {28, 3.50703, 2.9, -M_PI / 2, true},
-    {28, -1.97831, 0.94074, -M_PI, true},
-    {2, -2, 0.7, -M_PI, true},
-    // around franka
-    {CENTER_Y+RADIUS, -CENTER_X, 0.7, -M_PI, false},
-    {CENTER_Y+SQRT_R, -(CENTER_X-SQRT_R), 0.7, -M_PI*3/4, false},
-    {CENTER_Y, -(CENTER_X-RADIUS), 0.7, -M_PI/2, false},
-    {CENTER_Y-SQRT_R, -(CENTER_X-SQRT_R), 0.7, -M_PI/4, false},
-    {CENTER_Y-RADIUS, -(CENTER_X), 0.7, 0, false},
-    {CENTER_Y-SQRT_R, -(CENTER_X+SQRT_R), 0.7, M_PI/4, false},
-    {CENTER_Y, -(CENTER_X+RADIUS), 0.7, M_PI/2, false},
-    {CENTER_Y+SQRT_R, -(CENTER_X+SQRT_R), 0.7, M_PI*3/4, false},
-    // around franks 2
-    {CENTER_Y+RADIUS, -CENTER_X, 0.4, M_PI, false},
-    {CENTER_Y+SQRT_R, -(CENTER_X+SQRT_R), 0.4, M_PI*3/4, false},
-    {CENTER_Y, -(CENTER_X+RADIUS), 0.4, M_PI/2, false},
-    {CENTER_Y-SQRT_R, -(CENTER_X+SQRT_R), 0.4, M_PI/4, false},
-    {CENTER_Y-RADIUS, -(CENTER_X), 0.4, 0, false},
-    {CENTER_Y-SQRT_R, -(CENTER_X-SQRT_R), 0.4, -M_PI/4, false},
-    {CENTER_Y, -(CENTER_X-RADIUS), 0.4, -M_PI/2, false},
-    {CENTER_Y+SQRT_R, -(CENTER_X-SQRT_R), 0.4, -M_PI*3/4, false},
-    {CENTER_Y+RADIUS, -CENTER_X, 0.4, -M_PI, false},
-
+    // {7.18814, -4.13339, 2.9, 0, true},
+    {7.18814, -4.13339, 2.0, 0, true},
     {0, 0, 0.4, 0, true},
     {0, 0, 0, 0, false},
   };
-  
+  // // This is becuse the axis is not different
+  // Eigen::Matrix3d R;
+  // R << 0, -1, 0,
+  //      1,  0, 0,
+  //      0,  0, 1;
+  // for (auto &wp : waypoint_list_) {
+  //   Eigen::Vector3d pos(wp.x, wp.y, wp.z);
+  //   Eigen::Vector3d pos_rot = R * pos;
+  //   wp.x = pos_rot(0);
+  //   wp.y = pos_rot(1);
+  //   // wp.z = pos_rot(2);
+  //   wp.yaw += M_PI / 2;
+  // }
+  // waypoint_list_[0].yaw = 0;
+
   RCLCPP_INFO(this->get_logger(), "DroneDrive node started.");
 }
 
 
 void DroneDrive::positionCommandCb(
-    const drone_msgs::msg::PositionCommand::SharedPtr msg) {
+    const quadrotor_msgs::msg::PositionCommand::SharedPtr msg) {
   // Just store the command
   planner_pos_cmd_.x = msg->position.x;
   planner_pos_cmd_.y = msg->position.y;
@@ -135,12 +167,12 @@ void DroneDrive::positionCommandCb(
   pos_cmd_update_ = true;
 }
 
-void DroneDrive::execStatusCb(const drone_msgs::msg::ExecStatus::SharedPtr msg) {
+void DroneDrive::execStatusCb(const quadrotor_msgs::msg::ExecStatus::SharedPtr msg) {
   exec_status_ = msg->exec_flag;
 }
 
 bool DroneDrive::inPosition(PosCmd p2) {
-  const double DIS_ABS = 0.2;
+  constexpr double DIS_ABS = 0.2;
   geometry_msgs::msg::Pose p1 = odom_.pose.pose;
   double dis = sqrt(pow(p1.position.x - p2.x, 2) +
                     pow(p1.position.y - p2.y, 2) +
@@ -172,11 +204,7 @@ void DroneDrive::pubWaypoint(PosCmd p) {
   q.normalize();
   pose.pose.orientation = tf2::toMsg(q);
 
-  nav_msgs::msg::Path path;
-  path.poses.push_back(pose);
-  path.header.frame_id = "world";
-  path.header.stamp = this->now();
-  nav_pub_->publish(path);
+  nav_pub_->publish(pose);
 }
 
 void DroneDrive::odomCb(const nav_msgs::msg::Odometry::SharedPtr msg) {
@@ -205,33 +233,36 @@ void DroneDrive::cmdPubTimerCb() {
 
   if (exec_status_ == NONE || finish) return;
 
-  // Reach target
   if (inPosition(waypoint_list_[waypoint_now])) {
     bool next = false;
+    // Check if needing switch to next waypoint
     if (!waypoint_list_[waypoint_now].planner_ctrl) {
-      if (smooth_pos_.trajComplete(this->now()))
-        next = true;
+      if (smooth_pos_.trajComplete(this->now())) next = true;
     } else if (exec_status_ == WAIT_TARGET) next = true;
 
     if (next) {
+      // Check if needing take picture at this waypoint
       if (waypoint_list_[waypoint_now].picture) {
-        auto srv = std::make_shared<std_srvs::srv::Empty::Request>();
-        // if (!take_picture_client_->service_is_ready() ||
-        //     !take_picture_client_->async_send_request(srv)) {
-        //   RCLCPP_WARN(this->get_logger(), "Take picture failed.");
-        // }
-        if (!take_picture_client_->service_is_ready()) {
-          RCLCPP_WARN(this->get_logger(), "Take picture failed.");
+        if (!take_picture_client_->wait_for_service(2s)) {
+          RCLCPP_WARN(this->get_logger(), "Service /take_picture not available!");
+          return;
         }
+        auto srv = std::make_shared<std_srvs::srv::Empty::Request>();
+        auto res = take_picture_client_->async_send_request(srv);
+        RCLCPP_INFO(this->get_logger(), "Take picture!");
       }
 
+      // Switch to next
       ++waypoint_now;
+
+      // Check if all waypoints are visited
       if (waypoint_now >= waypoint_list_.size()) {
         RCLCPP_INFO(this->get_logger(), "All waypoint executed. Finish.");
         finish = true;
         return;
       }
 
+      // Check if needing start record or stop record
       if (waypoint_now == VIDEO_START_) {
         auto req = std::make_shared<std_srvs::srv::Empty::Request>();
         start_record_client_->async_send_request(req);
@@ -249,6 +280,15 @@ void DroneDrive::cmdPubTimerCb() {
 
       if (waypoint_list_[waypoint_now].planner_ctrl) {
         pos_cmd_update_ = false;
+        if (waypoint_list_[waypoint_now - 1].planner_ctrl == false) {
+          if (!set_yaw_client_->wait_for_service(2s)) {
+            RCLCPP_WARN(this->get_logger(), "Service /set_yaw not available!");
+            return;
+          }
+          auto srv = std::make_shared<std_srvs::srv::Empty::Request>();
+          auto res = set_yaw_client_->async_send_request(srv);
+          RCLCPP_INFO(this->get_logger(), "Reset yaw!");
+        }
         pubWaypoint(waypoint_list_[waypoint_now]);
         return;
       } else {
@@ -256,10 +296,14 @@ void DroneDrive::cmdPubTimerCb() {
                            waypoint_list_[waypoint_now], this->now());
       }
     }
+  } 
+
+  if (waypoint_list_[waypoint_now].planner_ctrl) {
+    if (!pos_cmd_update_) return;
+    else pos_cmd_update_=false;
   }
 
-  if (waypoint_list_[waypoint_now].planner_ctrl && !pos_cmd_update_) return;
-
+  // Send target pose to drone in sim
   sensor_msgs::msg::JointState joint_cmd;
   joint_cmd.name = {"x_joint", "y_joint", "z_joint", "R_body"};
 
@@ -272,6 +316,14 @@ void DroneDrive::cmdPubTimerCb() {
 
   joint_cmd.header.stamp = this->now();
   joint_pub_->publish(joint_cmd);
+
+  // Debug for curve visualization
+  drone_msgs::msg::JointState joint_debug;
+  joint_debug.x = joint_cmd.position[0];
+  joint_debug.y = joint_cmd.position[1];
+  joint_debug.z = joint_cmd.position[2];
+  joint_debug.yaw = joint_cmd.position[3];
+  joint_debug_pub_->publish(joint_debug);
 }
 
 } // namespace Drone

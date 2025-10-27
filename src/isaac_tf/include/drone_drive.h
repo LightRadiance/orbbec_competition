@@ -16,19 +16,22 @@
 #include <vector>
 #include <memory>
 
-#include "drone_msgs/msg/position_command.hpp"
-#include "drone_msgs/msg/exec_status.hpp"
+// #include "drone_msgs/msg/position_command.hpp"
+// #include "drone_msgs/msg/exec_status.hpp"
+#include "quadrotor_msgs/msg/exec_status.hpp"
+#include "quadrotor_msgs/msg/position_command.hpp"
+#include "drone_msgs/msg/joint_state.hpp"
 
 namespace Drone {
 
-struct PosCmd {
-  double x{0.0}, y{0.0}, z{0.0}, yaw{0.0};
-  bool planner_ctrl{false};
-  bool picture{false}; // Whether to take picture 
-};
-
 // Yaw convert to [-2PI, 2PI]
 double yawConvert(double yaw_in);
+
+struct PosCmd {
+  double x{0.0}, y{0.0}, z{0.0}, yaw{0.0};
+  bool planner_ctrl{false}; // Wheteher controlled by planner
+  bool picture{false}; // Whether to take picture 
+};
 
 // This class may be not complete
 class SmoothTraj {
@@ -38,6 +41,7 @@ private:
   double start_time;
 
 public:
+  // Set new trajectory
   void genNew(const PosCmd &start, const PosCmd &end, const rclcpp::Time& now) {
     start_pos = start;
     end_pos = end;
@@ -59,7 +63,6 @@ public:
   }
 };
 
-// === 主类声明 ===
 class DroneDrive : public rclcpp::Node {
 public:
   DroneDrive();
@@ -67,11 +70,12 @@ public:
 private:
   // Subscriber
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
-  rclcpp::Subscription<drone_msgs::msg::PositionCommand>::SharedPtr posititon_cmd_sub_;
-  rclcpp::Subscription<drone_msgs::msg::ExecStatus>::SharedPtr exec_status_sub_;
+  rclcpp::Subscription<quadrotor_msgs::msg::PositionCommand>::SharedPtr posititon_cmd_sub_;
+  rclcpp::Subscription<quadrotor_msgs::msg::ExecStatus>::SharedPtr exec_status_sub_;
 
-  rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr joint_pub_;
-  rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr nav_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr joint_pub_;\
+  rclcpp::Publisher<drone_msgs::msg::JointState>::SharedPtr joint_debug_pub_;
+  rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr nav_pub_;
   rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr camera_pose_pub_;
 
   rclcpp::Client<std_srvs::srv::Empty>::SharedPtr set_yaw_client_;
@@ -105,8 +109,8 @@ private:
   uint8_t exec_status_{NONE};
 
   // Callback
-  void positionCommandCb(const drone_msgs::msg::PositionCommand::SharedPtr msg);
-  void execStatusCb(const drone_msgs::msg::ExecStatus::SharedPtr msg);
+  void positionCommandCb(const quadrotor_msgs::msg::PositionCommand::SharedPtr msg);
+  void execStatusCb(const quadrotor_msgs::msg::ExecStatus::SharedPtr msg);
   void odomCb(const nav_msgs::msg::Odometry::SharedPtr msg);
   void cmdPubTimerCb();
 

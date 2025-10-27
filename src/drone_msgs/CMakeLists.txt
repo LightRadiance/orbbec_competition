@@ -13,6 +13,7 @@ find_package(geometry_msgs REQUIRED)
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/PositionCommand.msg"
   "msg/ExecStatus.msg"
+  "msg/JointState.msg"
   DEPENDENCIES
   std_msgs
   geometry_msgs
