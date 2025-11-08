@@ -87,55 +87,34 @@ DroneDrive::DroneDrive() : Node("drone_drive") {
   constexpr double CENTER_Y = 0.0;
   constexpr double RADIUS = 1.25;
   constexpr double SQRT_R = 1.118;
-  // waypoint_list_= {
-  //   {0, 0, 0, 0, false},
-  //   {0, 0, 0.6, 0, false},
-  //   // {7.18814, -4.13339, 2.9, 0, true},
-  //   {7.18814, -4.13339, 2.9, 0, true},
-  //   {7.18814, -4.13339, 2.9, 0, false, true},
-  //   // {7.18814, 0.48393, 2.9, 0, true},
-  //   {7.18814, 0.48393, 2.9, 0, true},
-  //   {7.18814, 0.48393, 2.9, 0, false, true},
-  //   // {7.18814, 5.48069, 2.9, 0, true},
-  //   {7.18814, 5.48069, 2.9, 0, true},
-  //   {7.18814, 5.48069, 2.9, 0, false, true},
-  //   // {28, 3.50703, 2.9, -M_PI / 2, true},
-  //   {28, 3.50703, 2.9, -M_PI / 2, true},
-  //   // {28, -1.97831, 0.94074, -M_PI, true},
-  //   {28, -1.97831, 0.94074, -M_PI, true},
-  //   // {2, -2, 0.7, -M_PI, true},
-  //   {2, -2, 0.7, -M_PI, true},
-  //   // around franka
-  //   {CENTER_Y+RADIUS, -CENTER_X, 0.7, -M_PI, false},
-  //   {CENTER_Y+SQRT_R, -(CENTER_X-SQRT_R), 0.7, -M_PI*3/4, false},
-  //   {CENTER_Y, -(CENTER_X-RADIUS), 0.7, -M_PI/2, false},
-  //   {CENTER_Y-SQRT_R, -(CENTER_X-SQRT_R), 0.7, -M_PI/4, false},
-  //   {CENTER_Y-RADIUS, -(CENTER_X), 0.7, 0, false},
-  //   {CENTER_Y-SQRT_R, -(CENTER_X+SQRT_R), 0.7, M_PI/4, false},
-  //   {CENTER_Y, -(CENTER_X+RADIUS), 0.7, M_PI/2, false},
-  //   {CENTER_Y+SQRT_R, -(CENTER_X+SQRT_R), 0.7, M_PI*3/4, false},
-  //   // around franks 2
-  //   {CENTER_Y+RADIUS, -CENTER_X, 0.4, M_PI, false},
-  //   {CENTER_Y+SQRT_R, -(CENTER_X+SQRT_R), 0.4, M_PI*3/4, false},
-  //   {CENTER_Y, -(CENTER_X+RADIUS), 0.4, M_PI/2, false},
-  //   {CENTER_Y-SQRT_R, -(CENTER_X+SQRT_R), 0.4, M_PI/4, false},
-  //   {CENTER_Y-RADIUS, -(CENTER_X), 0.4, 0, false},
-  //   {CENTER_Y-SQRT_R, -(CENTER_X-SQRT_R), 0.4, -M_PI/4, false},
-  //   {CENTER_Y, -(CENTER_X-RADIUS), 0.4, -M_PI/2, false},
-  //   {CENTER_Y+SQRT_R, -(CENTER_X-SQRT_R), 0.4, -M_PI*3/4, false},
-  //   {CENTER_Y+RADIUS, -CENTER_X, 0.4, -M_PI, false},
-
-  //   {0, 0, 0.4, 0, true},
-  //   {0, 0, 0, 0, false},
-  // };
 
   // Test
   waypoint_list_= {
     {0, 0, 0, 0, false},
     {0, 0, 0.6, 0, false},
-    // {7.18814, -4.13339, 2.9, 0, true},
-    {7.18814, -4.13339, 2.0, 0, true},
-    {0, 0, 0.4, 0, true},
+    {2, -1.2, 0.7, M_PI/2, true},
+
+    {CENTER_X, -(CENTER_Y+RADIUS), 0.7, M_PI*2/4, false},
+    {CENTER_X+SQRT_R, -(CENTER_Y+SQRT_R), 0.7, M_PI*3/4, false},
+    {CENTER_X+RADIUS, CENTER_Y, 0.7, M_PI, false},
+    {CENTER_X+SQRT_R, (CENTER_Y+SQRT_R), 0.7, M_PI*5/4, false},
+    {CENTER_X, (CENTER_Y+RADIUS), 0.7, M_PI*6/4, false},
+    {CENTER_X-SQRT_R, (CENTER_Y+SQRT_R), 0.7, M_PI*7/4, false},
+    {CENTER_X-RADIUS, (CENTER_Y), 0.7, M_PI*8/4, false},
+    {CENTER_X-SQRT_R, -(CENTER_Y+SQRT_R), 0.7, M_PI*9/4, false},
+
+
+
+    {CENTER_X, -(CENTER_Y+RADIUS), 0.7, M_PI*10/4, false},
+    {CENTER_X+SQRT_R, -(CENTER_Y+SQRT_R), 0.7, M_PI*11/4, false},
+    {CENTER_X+RADIUS, CENTER_Y, 0.7, M_PI*12/4, false},
+    {CENTER_X+SQRT_R, (CENTER_Y+SQRT_R), 0.7, M_PI*13/4, false},
+    {CENTER_X, (CENTER_Y+RADIUS), 0.7, M_PI*14/4, false},
+    {CENTER_X-SQRT_R, (CENTER_Y+SQRT_R), 0.7, M_PI*15/4, false},
+    {CENTER_X-RADIUS, (CENTER_Y), 0.7, M_PI*16/4, false},
+    {CENTER_X-SQRT_R, -(CENTER_Y+SQRT_R), 0.7, M_PI*17/4, false},
+    
+    {0, 0, 0.4, M_PI*20/4, true},
     {0, 0, 0, 0, false},
   };
   // // This is becuse the axis is not different

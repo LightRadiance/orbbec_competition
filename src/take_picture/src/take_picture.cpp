@@ -51,7 +51,7 @@ public:
 
     // Subsriber and Service
     image_sub_ = this->create_subscription<sensor_msgs::msg::Image>(
-        "/camera_rgb", 10,
+        "/drone_0_pcl_render_node/camera_rgb", 10,
         std::bind(&TakePictureServer::imageCb, this, std::placeholders::_1));
     // odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
     //     "/odom", 10,

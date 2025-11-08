@@ -94,8 +94,8 @@ private:
   std::vector<PosCmd> waypoint_list_;
   bool pos_cmd_update_{false};
 
-  int VIDEO_START_{11};
-  int VIDEO_STOP_{27};
+  int VIDEO_START_{3};
+  int VIDEO_STOP_{18};
 
   enum ExecState : uint8_t {
     INIT = 0,
